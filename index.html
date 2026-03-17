@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Code Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .code-editor { font-family: 'Fira Code', monospace; }
+        .output-area { background: #1e1e1e; color: #d4d4d4; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4 md:p-8">
+    <div class="max-w-5xl mx-auto">
+        <header class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-400">Live Code Editor</h1>
+                <p class="text-gray-400 text-sm">Backend Intern Assignment Demo</p>
+            </div>
+            <div id="session-badge" class="bg-gray-800 px-3 py-1 rounded text-xs border border-gray-700">
+                No Session
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Editor Column -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
+                    <div class="bg-gray-700 px-4 py-2 flex justify-between items-center text-sm">
+                        <span>main.py (Python 3)</span>
+                        <button id="btn-init" class="text-blue-400 hover:text-blue-300">Create Session</button>
+                    </div>
+                    <textarea id="code-input" class="w-full h-80 bg-gray-900 p-4 code-editor focus:outline-none resize-none text-green-400" spellcheck="false">print("Chào mừng đến với Edtronaut!")
+a = 10
+b = 20
+print(f"Tổng là: {a + b}")</textarea>
+                </div>
+                
+                <div class="flex gap-4">
+                    <button id="btn-run" disabled class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 font-bold py-3 rounded-lg transition">
+                        RUN CODE
+                    </button>
+                </div>
+            </div>
+
+            <!-- Output Column -->
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">Execution Result</h2>
+                <div id="output" class="output-area h-[400px] rounded-lg p-4 text-sm overflow-auto border border-gray-700">
+                    <span class="text-gray-500 italic">Click Run to see the result...</span>
+                </div>
+                <div id="status-log" class="text-xs text-gray-500 space-y-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://localhost:8000";
+        let sessionId = null;
+        let executionId = null;
+
+        const codeInput = document.getElementById('code-input');
+        const outputArea = document.getElementById('output');
+        const btnRun = document.getElementById('btn-run');
+        const btnInit = document.getElementById('btn-init');
+        const sessionBadge = document.getElementById('session-badge');
+        const statusLog = document.getElementById('status-log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            statusLog.innerHTML = `<div>[${time}] ${msg}</div>` + statusLog.innerHTML;
+        }
+
+        async function initSession() {
+            try {
+                const res = await fetch(`${API_BASE}/code-sessions`, { method: 'POST' });
+                const data = await res.json();
+                sessionId = data.session_id;
+                sessionBadge.innerText = `ID: ${sessionId.substring(0, 8)}...`;
+                btnRun.disabled = false;
+                log("Đã khởi tạo Session thành công.");
+            } catch (err) {
+                log("Lỗi khởi tạo: Kiểm tra Backend đã chạy chưa?");
+            }
+        }
+
+        async function runCode() {
+            if (!sessionId) return;
+            outputArea.innerHTML = '<span class="text-blue-400">Đang thực thi...</span>';
+            
+            try {
+                // Autosave
+                await fetch(`${API_BASE}/code-sessions/${sessionId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ language: 'python', source_code: codeInput.value })
+                });
+                log("Đã lưu code tạm thời.");
+
+                // Run
+                const res = await fetch(`${API_BASE}/code-sessions/${sessionId}/run`, { method: 'POST' });
+                const data = await res.json();
+                executionId = data.execution_id;
+                log(`Đã gửi task: ${executionId.substring(0, 8)}`);
+
+                // Poll Result
+                pollResult();
+            } catch (err) {
+                outputArea.innerText = "Lỗi kết nối API.";
+            }
+        }
+
+        async function pollResult() {
+            const check = async () => {
+                const res = await fetch(`${API_BASE}/executions/${executionId}`);
+                const data = await res.json();
+                
+                if (data.status === 'QUEUED' || data.status === 'RUNNING') {
+                    setTimeout(check, 1000);
+                } else {
+                    displayResult(data);
+                }
+            };
+            check();
+        }
+
+        function displayResult(data) {
+            log(`Hoàn thành với trạng thái: ${data.status}`);
+            let html = `<div class="mb-2 text-xs text-gray-400 border-b border-gray-800 pb-1">Trạng thái: ${data.status} | Thời gian: ${data.execution_time_ms}ms</div>`;
+            
+            if (data.stdout) html += `<pre class="text-green-400">${data.stdout}</pre>`;
+            if (data.stderr) html += `<pre class="text-red-400">${data.stderr}</pre>`;
+            
+            outputArea.innerHTML = html;
+        }
+
+        btnInit.onclick = initSession;
+        btnRun.onclick = runCode;
+    </script>
+</body>
+</html>
